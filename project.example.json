@@ -1,0 +1,13 @@
+{
+  "//": "AgentLane project file. Open it via 'Open Project' to launch all sessions at once. Per-session fields override the shared defaults below. Names are optional (auto-generated).",
+  "cwd": "C:\\Daanish projects\\multi-AI-Harness",
+  "model": null,
+  "permission_mode": "acceptEdits",
+  "sessions": [
+    { "mode": "headless", "prompt": "Review the README and list any inaccuracies." },
+    { "mode": "headless", "prompt": "Find all TODO and FIXME comments and summarize them." },
+    { "mode": "headless", "cwd": "C:\\some\\other\\project", "model": "claude-sonnet-4-6", "prompt": "Run the test suite and fix failures." },
+    { "mode": "shell" },
+    { "mode": "interactive" }
+  ]
+}

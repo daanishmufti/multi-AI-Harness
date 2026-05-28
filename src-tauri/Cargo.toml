@@ -1,0 +1,38 @@
+[package]
+name = "harness"
+version = "0.1.0"
+description = "Multi-session terminal orchestrator for Windows"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+# The `_lib` suffix keeps the lib name distinct from the bin on Windows.
+name = "harness_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Orchestration / IO
+portable-pty = "0.8"                                    # ConPTY on Windows (wezterm)
+rusqlite = { version = "0.32", features = ["bundled"] } # bundled SQLite
+sysinfo = "0.33"                                        # per-process CPU/RAM
+parking_lot = "0.12"                                    # fast, non-poisoning mutexes
+uuid = { version = "1", features = ["v4"] }
+anyhow = "1"
+base64 = "0.22"
+
+[profile.release]
+# Favor a lean, fast binary for the orchestrator.
+opt-level = 3
+lto = "fat"        # fat LTO — better dead-code elimination + inlining
+codegen-units = 1
+strip = true
+panic = "abort"    # smaller code, no unwinding machinery
+incremental = false

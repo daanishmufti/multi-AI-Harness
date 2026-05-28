@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AgentLane</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+  <body>
+    <div id="app">
+      <!-- Top bar: live system metrics, broadcast, controls -->
+      <header id="topbar">
+        <button id="sidebar-toggle" class="icon-btn" title="Hide / show sidebar">☰</button>
+        <div id="metrics" class="metrics"></div>
+        <form id="broadcast-form" class="broadcast" title="Send to every live session (b)">
+          <input id="broadcast-input" placeholder="Broadcast to all sessions…" autocomplete="off" />
+          <button type="submit">Send</button>
+        </form>
+        <div class="view-controls">
+          <button id="voice-btn" title="Toggle voice mode (Web Speech API)">🎙 Voice</button>
+          <select id="voice-mode" class="voice-mode" title="How voice picks its target session">
+            <option value="sidebar">Sidebar (default)</option>
+            <option value="hover">Hover</option>
+            <option value="pane">Pane click</option>
+            <option value="command">Voice (“lane …”)</option>
+          </select>
+          <span id="voice-target" class="voice-target hidden" title="Voice goes to this session"></span>
+          <button id="zen-btn" title="Expand terminal area — hide side &amp; bottom panels (z)">⛶ Expand</button>
+          <button id="full-btn" title="Fullscreen — hide all chrome &amp; window edges (F11)">⤢ Full</button>
+        </div>
+      </header>
+      <div id="fs-hint" class="fs-hint">Esc / F11 to exit fullscreen</div>
+
+      <div id="body">
+        <!-- Left: session registry -->
+        <aside id="sidebar">
+          <div class="sidebar-actions">
+            <button id="new-headless" title="New headless Claude worker (n)">+ Worker</button>
+            <button id="new-interactive" title="New interactive Claude session (N)">+ Claude</button>
+            <button id="new-shell" title="New terminal — PowerShell / cmd (s)">+ Terminal</button>
+            <button id="new-task" title="Queue a task (t)">+ Task</button>
+          </div>
+          <input id="filter" class="filter" placeholder="Filter sessions  (/)" autocomplete="off" />
+          <div id="project-bar" class="project-bar hidden"></div>
+          <ul id="session-list" class="session-list"></ul>
+          <div class="sidebar-footer">
+            <button id="new-project" title="Create a new project — author multiple sessions, then launch or save">New Project</button>
+            <button id="open-project" title="Open sessions from a project file (no naming needed)">Open Project</button>
+            <button id="save-project" title="Save current sessions to a project file">Save Project</button>
+            <button id="snapshot-save" title="Save a workspace snapshot">Snapshot</button>
+            <button id="snapshot-restore" title="Restore a snapshot">Restore</button>
+            <button id="settings-btn" title="Orchestrator settings">Settings</button>
+          </div>
+        </aside>
+
+        <!-- Draggable divider: resize / collapse the sidebar -->
+        <div id="sidebar-resizer" class="resizer" title="Drag to resize · double-click to collapse"></div>
+
+        <!-- Center: up to max_attached rendered panes -->
+        <main id="panes" class="panes empty">
+          <div class="panes-hint">
+            <p>No sessions attached.</p>
+            <p>Select a session and press <kbd>Enter</kbd> to attach. Up to 4 render at once.</p>
+          </div>
+        </main>
+      </div>
+
+      <!-- Draggable divider: resize / collapse the task bar -->
+      <div id="taskbar-resizer" class="resizer horiz" title="Drag to resize · double-click to collapse"></div>
+
+      <!-- Bottom: task queue -->
+      <footer id="taskbar">
+        <div class="taskbar-title">Task queue</div>
+        <div id="task-list" class="task-list"></div>
+      </footer>
+    </div>
+
+    <div id="modal-root"></div>
+  </body>
+</html>

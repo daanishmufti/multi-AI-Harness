@@ -1,0 +1,350 @@
+/* Dark, dense orchestrator dashboard. Tokyo-night-ish palette. */
+:root {
+  --bg: #0b0e14;
+  --bg-1: #11151f;
+  --bg-2: #161b27;
+  --bg-3: #1f2533;
+  --border: #232a3b;
+  --fg: #c5c8d3;
+  --fg-dim: #7a82a0;
+  --accent: #5ef38c;
+  --green: #9ece6a;
+  --yellow: #e0af68;
+  --red: #f7768e;
+  --magenta: #bb9af7;
+  --cyan: #7dcfff;
+  --orange: #ff9e64;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+  user-select: none;
+}
+button {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+button:hover { background: #2a3142; border-color: var(--accent); }
+input, select, textarea {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 9px;
+  outline: none;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+kbd {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 11px;
+}
+
+#app {
+  display: grid;
+  grid-template-rows: 44px 1fr 6px var(--taskbar-h, 150px);
+  grid-template-columns: 1fr;
+  height: 100vh;
+}
+/* Drag below threshold: task bar fully hidden, divider becomes a chevron handle. */
+#app.taskbar-collapsed { grid-template-rows: 44px 1fr 11px 0; }
+
+/* ---- top bar ---- */
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 14px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+}
+.icon-btn { font-size: 15px; line-height: 1; padding: 4px 9px; }
+.metrics { display: flex; gap: 14px; flex: 1; flex-wrap: wrap; color: var(--fg-dim); }
+.metrics .m { white-space: nowrap; }
+.metrics .m b { color: var(--fg); font-variant-numeric: tabular-nums; }
+.metrics .m.warn b { color: var(--orange); }
+.broadcast { display: flex; gap: 6px; }
+.broadcast input { width: 240px; }
+.view-controls { display: flex; gap: 6px; }
+.view-controls button { font-size: 12px; white-space: nowrap; }
+.view-controls button.active { background: var(--accent); color: #0b0e14; border-color: var(--accent); }
+
+/* Voice target mode selector */
+.voice-mode {
+  font-size: 11px; padding: 3px 6px; height: 26px;
+  background: var(--bg-1); color: var(--fg); border: 1px solid var(--border); border-radius: 6px;
+}
+.voice-mode:focus { border-color: var(--accent); }
+
+/* Voice target pill in the top bar */
+.voice-target {
+  font-size: 11px; color: var(--accent); white-space: nowrap;
+  padding: 3px 9px; border: 1px solid var(--accent); border-radius: 12px;
+  background: rgba(94, 243, 140, 0.08);
+}
+.voice-target.hidden { display: none; }
+
+/* Voice target follows the cursor anywhere (sidebar row or attached pane);
+   the matching row gets a mic mark in front of its name. */
+.session-row.voice-target .name::before {
+  content: "🎙 ";
+  color: var(--accent);
+  margin-right: 2px;
+}
+.session-row.voice-target { box-shadow: inset 3px 0 0 var(--accent); }
+
+/* Inline rename input for the session name */
+.name-edit { font: inherit; padding: 1px 5px; width: calc(100% - 8px); }
+
+/* ---- view modes ---- */
+/* Expand (zen): hide side + bottom panels, keep a slim top bar */
+#app.zen { grid-template-rows: 44px 1fr; }
+#app.zen #sidebar, #app.zen #taskbar { display: none; }
+#app.zen #body { grid-template-columns: 1fr; }
+
+/* Fullscreen: hide ALL chrome; only the terminal container remains */
+#app.fullscreen { grid-template-rows: 1fr; }
+#app.fullscreen #topbar, #app.fullscreen #sidebar, #app.fullscreen #taskbar { display: none; }
+#app.fullscreen #body { grid-template-columns: 1fr; }
+
+
+.fs-hint {
+  display: none; position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+  z-index: 200; padding: 5px 12px; border-radius: 14px; font-size: 12px;
+  background: rgba(17,21,31,0.9); color: var(--fg-dim); border: 1px solid var(--border);
+  pointer-events: none; animation: fade-out 2.4s forwards;
+}
+#app.fullscreen .fs-hint { display: block; }
+@keyframes fade-out { 0%,60% { opacity: 1; } 100% { opacity: 0; } }
+
+/* ---- body split (resizable / collapsible sidebar) ---- */
+#body { display: grid; grid-template-columns: var(--sidebar-w, 290px) 6px 1fr; min-height: 0; }
+#body.sidebar-collapsed { grid-template-columns: 0 11px 1fr; }
+/* Shrink to a 0-width track and clip — keeps it a grid item so the resizer and
+   panes stay in their columns (display:none would shift them and leak content). */
+#body.sidebar-collapsed #sidebar { border-right: 0; }
+/* In expand/fullscreen view modes the sidebar + its handle are hidden. */
+#app.zen #sidebar-resizer, #app.fullscreen #sidebar-resizer { display: none; }
+#app.zen .resizer.horiz, #app.fullscreen .resizer.horiz { display: none; }
+
+.resizer {
+  background: var(--border); cursor: col-resize; position: relative;
+  transition: background 0.1s;
+}
+.resizer:hover, .resizer.dragging { background: var(--accent); }
+#body.sidebar-collapsed .resizer { cursor: e-resize; background: var(--bg-2); }
+.resizer::after {
+  content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  color: var(--accent); font-size: 12px; line-height: 1;
+}
+#body.sidebar-collapsed .resizer::after { content: "›"; }
+
+/* Horizontal resizer (between body and task bar) */
+.resizer.horiz { cursor: row-resize; }
+#app.taskbar-collapsed .resizer.horiz { cursor: n-resize; background: var(--bg-2); }
+#app.taskbar-collapsed .resizer.horiz::after { content: "‹"; transform: translate(-50%, -50%) rotate(90deg); }
+
+/* ---- sidebar ---- */
+#sidebar {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border);
+  min-height: 0;
+  /* min-width:0 lets the grid track shrink it to 0; overflow clips contents so
+     nothing leaks out when collapsed or at the minimum width. */
+  min-width: 0;
+  overflow: hidden;
+}
+/* 2-column grid so the create buttons reflow cleanly at any sidebar width */
+.sidebar-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px; }
+.sidebar-actions button { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.filter { margin: 0 8px 8px; }
+.session-list { list-style: none; margin: 0; padding: 0 6px; overflow-y: auto; flex: 1; }
+.session-row {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 2px 8px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+.session-row:hover { background: var(--bg-2); }
+.session-row.selected { background: var(--bg-2); border-color: var(--accent); }
+.session-row.attached { box-shadow: inset 3px 0 0 var(--cyan); }
+.session-row .dot { grid-row: 1 / 3; align-self: center; }
+.session-row .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-row .meta { grid-column: 2 / 4; color: var(--fg-dim); font-size: 11px; display: flex; gap: 8px; flex-wrap: wrap; }
+.session-row .row-actions {
+  grid-row: 1; grid-column: 3; justify-self: end; align-self: center;
+  display: flex; align-items: center; gap: 6px;
+}
+.session-row .badge {
+  font-size: 10px; padding: 1px 6px; border-radius: 10px;
+  background: var(--bg-3); color: var(--fg-dim);
+}
+.session-row .badge.interactive { color: var(--cyan); }
+.session-row .badge.shell { color: var(--green); }
+.session-row .row-remove,
+.session-row .row-rename {
+  background: transparent; border: none; color: var(--fg-dim);
+  padding: 0 3px; font-size: 12px; line-height: 1; cursor: pointer;
+  opacity: 0; transition: opacity 0.1s;
+}
+.session-row:hover .row-remove, .session-row.selected .row-remove,
+.session-row:hover .row-rename, .session-row.selected .row-rename { opacity: 0.7; }
+.session-row .row-remove:hover { color: var(--red); opacity: 1; background: transparent; }
+.session-row .row-rename:hover { color: var(--accent); opacity: 1; background: transparent; }
+.session-row .name { cursor: text; }
+.session-row .badge.interactive { color: var(--cyan); }
+.session-row .meta .tok { color: var(--magenta); }
+.session-row .meta .cost { color: var(--green); }
+
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--fg-dim); }
+.dot-starting { background: var(--yellow); animation: pulse 1s infinite; }
+.dot-idle { background: var(--fg-dim); }
+.dot-busy { background: var(--green); animation: pulse 1.2s infinite; }
+.dot-completed { background: var(--accent); }
+.dot-crashed { background: var(--red); }
+.dot-stopped { background: #555; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.sidebar-footer { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-top: 1px solid var(--border); }
+.sidebar-footer button { flex: 1 1 30%; font-size: 11px; white-space: nowrap; }
+
+/* ---- panes ---- */
+.panes { display: grid; gap: 6px; padding: 6px; min-height: 0; background: var(--bg); }
+.panes.empty { display: flex; align-items: center; justify-content: center; }
+.panes-hint { color: var(--fg-dim); text-align: center; line-height: 1.8; }
+.panes:not(.empty) .panes-hint { display: none; }
+
+.pane {
+  display: flex; flex-direction: column;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 0;
+}
+.pane.focused { border-color: var(--accent); }
+.pane-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 9px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.pane-title { font-weight: 600; }
+.pane-badge { font-size: 10px; color: var(--fg-dim); background: var(--bg-3); padding: 1px 6px; border-radius: 10px; }
+.pane-cwd { color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.pane-detach { font-size: 11px; padding: 2px 8px; }
+.pane-max { font-size: 13px; line-height: 1; padding: 2px 7px; }
+.term-host { flex: 1; min-height: 0; padding: 4px; }
+
+/* fullscreen one pane: hide the rest, fill the pane area */
+.panes.has-max { display: block !important; position: relative; }
+.panes.has-max .pane { display: none; }
+.panes.has-max .pane.maximized { display: flex; position: absolute; inset: 0; }
+
+/* headless log view */
+.log-body {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 6px 8px; font-family: "Cascadia Code", Consolas, monospace; font-size: 12px;
+}
+.log { display: flex; gap: 8px; padding: 1px 0; white-space: pre-wrap; word-break: break-word; }
+.log-tag { color: var(--fg-dim); min-width: 78px; text-align: right; user-select: none; }
+.log-assistant .log-text { color: var(--fg); }
+.log-tool_use .log-tag, .log-tool_use .log-text { color: var(--cyan); }
+.log-tool_result .log-text { color: var(--fg-dim); }
+.log-result .log-text { color: var(--green); }
+.log-user .log-text { color: var(--accent); }
+.log-system .log-text, .log-system .log-tag { color: var(--fg-dim); }
+.log-stderr .log-text, .log-error .log-text { color: var(--red); }
+.msg-form { display: flex; padding: 6px; border-top: 1px solid var(--border); gap: 6px; }
+.msg-form input { flex: 1; }
+
+/* ---- task bar ---- */
+#taskbar {
+  background: var(--bg-1); border-top: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  /* min-height:0 + overflow:hidden lets the grid track shrink it to 0 and
+     clip its contents — same approach as the sidebar collapse. */
+  min-height: 0; overflow: hidden;
+}
+.taskbar-title { padding: 6px 12px; font-weight: 600; color: var(--fg-dim); border-bottom: 1px solid var(--border); }
+.task-list { overflow-y: auto; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
+.task-row {
+  display: grid; grid-template-columns: 90px 1fr auto auto; gap: 10px; align-items: center;
+  padding: 5px 8px; background: var(--bg-2); border-radius: 6px; font-size: 12px;
+}
+.task-row .tstatus { font-weight: 600; text-transform: uppercase; font-size: 10px; }
+.tstatus.queued { color: var(--yellow); }
+.tstatus.assigned, .tstatus.running { color: var(--green); }
+.tstatus.done { color: var(--accent); }
+.tstatus.failed { color: var(--red); }
+.tstatus.canceled { color: var(--fg-dim); }
+.task-row .tprompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-row .tcwd { color: var(--fg-dim); font-size: 11px; }
+
+/* ---- modal ---- */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center; z-index: 100;
+}
+.modal {
+  background: var(--bg-1); border: 1px solid var(--border); border-radius: 10px;
+  padding: 18px; width: 460px; max-width: 92vw; box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+}
+.modal h2 { margin: 0 0 14px; font-size: 16px; }
+.modal label { display: block; margin: 10px 0 4px; color: var(--fg-dim); font-size: 12px; }
+.modal input, .modal select, .modal textarea { width: 100%; }
+.modal textarea { min-height: 70px; resize: vertical; font-family: inherit; }
+.modal .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.modal .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.modal .check { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.modal .check input { width: auto; }
+.dir-row { display: flex; gap: 6px; }
+.dir-row input { flex: 1; }
+.dir-row button { white-space: nowrap; }
+
+/* new-project builder */
+.modal.modal-wide { width: 580px; }
+.np-sessions { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; margin: 4px 0 8px; }
+.np-row { display: grid; grid-template-columns: 150px 1fr 120px auto; gap: 6px; align-items: center; }
+.np-row select, .np-row input { width: 100%; }
+.np-rm { background: transparent; border: none; color: var(--fg-dim); cursor: pointer; padding: 0 4px; }
+.np-rm:hover { color: var(--red); background: transparent; }
+.np-adders { display: flex; gap: 6px; margin-bottom: 6px; }
+.np-adders button { flex: 1; }
+
+/* active project bar in the sidebar */
+.project-bar { margin: 0 8px 8px; padding: 7px 8px; background: var(--bg-2); border: 1px solid var(--accent); border-radius: 8px; }
+.project-bar.hidden { display: none; }
+.pb-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.pb-name { flex: 1; font-size: 12px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-clear { background: transparent; border: none; color: var(--fg-dim); cursor: pointer; padding: 0 4px; }
+.pb-clear:hover { color: var(--red); background: transparent; }
+.pb-adds { display: flex; gap: 5px; }
+.pb-adds button { flex: 1 1 0; min-width: 0; font-size: 11px; padding: 3px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
