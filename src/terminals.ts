@@ -201,8 +201,10 @@ export class Panes {
     // and the webview's own accelerators (Ctrl+P print, Ctrl+F find, Ctrl+R
     // reload, Ctrl+S save, Ctrl+W close, Ctrl +/-/0 zoom) are cancelled so they
     // can't hijack the key:
-    //   • Ctrl+A             — highlight the command line at the cursor (the
-    //                          input), drawn by xterm so it's always visible.
+    //   • Ctrl+A             — shell pane: forwarded, so PSReadLine's SelectAll
+    //                          highlights exactly the typed command. Claude pane
+    //                          (Ctrl+A = beginning-of-line there): we highlight
+    //                          the input line ourselves, hugging the text.
     //   • Ctrl+Shift+A       — select THIS pane's whole buffer (to copy output).
     //   • Ctrl+C / Ctrl+⇧+C  — copy the selection (bare Ctrl+C with none → ^C).
     //   • Ctrl+V / Ctrl+⇧+V  — paste.
@@ -211,6 +213,7 @@ export class Panes {
     // keydown so it never emits ^V (\x16) — the bug that stopped pastes — while
     // letting the OS paste proceed, after which xterm's own `paste` listener
     // injects the clipboard text into the PTY. No clipboard-read grant needed.
+    const isShell = s.mode === "shell";
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
       // Plain keys, the arrows, Home/End/PageUp-Down and the function keys
@@ -218,14 +221,21 @@ export class Panes {
       if (!e.ctrlKey && !e.altKey && !e.metaKey) return true;
 
       const key = e.key.toLowerCase();
-      // Ctrl+A highlights the command line at the cursor; Ctrl+Shift+A selects
-      // the whole buffer. We draw the selection in xterm ourselves so it is
-      // always visible, instead of hoping the shell renders its own highlight.
       if (e.ctrlKey && !e.altKey && key === "a") {
-        if (e.shiftKey) term.selectAll();
-        else selectInputLine(term);
-        e.preventDefault();
-        return false;
+        if (e.shiftKey) {
+          term.selectAll();        // Ctrl+Shift+A: whole buffer, either pane
+          e.preventDefault();
+          return false;
+        }
+        if (!isShell) {
+          // Claude's CLI maps Ctrl+A to beginning-of-line, so draw the input
+          // highlight ourselves (guaranteed visible, hugging the text).
+          selectInputLine(term);
+          e.preventDefault();
+          return false;
+        }
+        // Shell pane: fall through so ^A reaches PSReadLine, whose own SelectAll
+        // highlights just the typed command (no prompt, no border).
       }
       if (e.ctrlKey && key === "c") {
         const sel = term.getSelection();
@@ -420,7 +430,11 @@ function selectInputLine(term: Terminal): void {
   while (start > 0 && buf.getLine(start)?.isWrapped) start--; // up to logical start
   let end = cursorRow;
   while (buf.getLine(end + 1)?.isWrapped) end++; // down across wrapped rows
-  term.selectLines(start, end);
+  // Select only up to the last non-blank cell so the highlight hugs the text
+  // instead of stretching the full width out to the pane border.
+  const contentLen = buf.getLine(end)?.translateToString(true).length ?? 0;
+  const length = (end - start) * term.cols + contentLen;
+  if (length > 0) term.select(0, start, length);
 }
 
 /** Copy text to the system clipboard (best-effort; ignores denial). */
