@@ -20,27 +20,14 @@ export interface KeyHandlers {
   escape: () => void;
 }
 
-/** True when focus sits inside a live xterm terminal. Every keystroke there —
- *  Escape, the arrows, and any Ctrl/Alt chord — belongs to the shell, so the
- *  dashboard's global shortcuts must keep their hands off. */
-function inTerminal(t: EventTarget | null): boolean {
-  const el = t as HTMLElement | null;
-  return !!el?.closest?.(".xterm, .term-host");
-}
-
 function isTyping(t: EventTarget | null): boolean {
   const el = t as HTMLElement | null;
-  if (!el) return false;
-  if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") return true;
-  return el.isContentEditable || inTerminal(t);
+  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT");
 }
 
 export function installKeyboard(h: KeyHandlers): void {
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      // A focused terminal owns Escape (vim, menus, readline search) — never
-      // hijack it to unwind views or blur the field out from under the shell.
-      if (inTerminal(e.target)) return;
       if (isTyping(e.target)) (document.activeElement as HTMLElement | null)?.blur();
       else h.escape();
       return;

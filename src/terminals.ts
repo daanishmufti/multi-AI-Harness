@@ -26,10 +26,6 @@ const THEME = {
   background: "#0b0e14",
   foreground: "#c5c8d3",
   cursor: "#7aa2f7",
-  // Without an explicit selection color xterm's highlight is nearly invisible
-  // on this dark background, which reads as "drag-select doesn't work".
-  selectionBackground: "#33467c",
-  selectionInactiveBackground: "#2a2f45",
   black: "#15161e",
   brightBlack: "#414868",
   red: "#f7768e",
@@ -117,12 +113,6 @@ export class Panes {
     const p = this.panes.get(id);
     p?.term?.focus();
     p?.root.scrollIntoView({ block: "nearest" });
-    this.setFocusedClass(id);
-  }
-
-  /** Paint the focus ring on one pane (and clear it from the rest) without
-   *  re-grabbing focus — used when the terminal itself reports a focus change. */
-  private setFocusedClass(id: string | null): void {
     for (const [pid, pane] of this.panes) pane.root.classList.toggle("focused", pid === id);
   }
 
@@ -196,89 +186,32 @@ export class Panes {
 
     term.onData((d) => void api.sendInput(s.id, d));
 
-    // Drive the pane like a real console, but handle the chords a GUI terminal
-    // user expects up front; the rest forward to the shell as control bytes,
-    // and the webview's own accelerators (Ctrl+P print, Ctrl+F find, Ctrl+R
-    // reload, Ctrl+S save, Ctrl+W close, Ctrl +/-/0 zoom) are cancelled so they
-    // can't hijack the key:
-    //   • Ctrl+A             — shell pane: forwarded, so PSReadLine's SelectAll
-    //                          highlights exactly the typed command. Claude pane
-    //                          (Ctrl+A = beginning-of-line there): we highlight
-    //                          the input line ourselves, hugging the text.
-    //   • Ctrl+Shift+A       — select THIS pane's whole buffer (to copy output).
-    //   • Ctrl+C / Ctrl+⇧+C  — copy the selection (bare Ctrl+C with none → ^C).
-    //   • Ctrl+V / Ctrl+⇧+V  — paste.
-    //   • Ctrl+Z / Ctrl+Y, … — forwarded to the shell (PSReadLine undo / redo).
-    // Paste returns false *without* preventDefault: that short-circuits xterm's
-    // keydown so it never emits ^V (\x16) — the bug that stopped pastes — while
-    // letting the OS paste proceed, after which xterm's own `paste` listener
-    // injects the clipboard text into the PTY. No clipboard-read grant needed.
-    const isShell = s.mode === "shell";
+    // Clipboard, terminal-style: Ctrl+Shift+C / Ctrl+Shift+V always copy/paste,
+    // and a bare Ctrl+C copies when there's a selection (otherwise it falls
+    // through as SIGINT, the usual terminal behavior). Native Ctrl+V still works
+    // too — xterm handles the textarea paste event itself.
     term.attachCustomKeyEventHandler((e) => {
-      if (e.type !== "keydown") return true;
-      // Plain keys, the arrows, Home/End/PageUp-Down and the function keys
-      // already emit the correct sequence via xterm; nothing to guard.
-      if (!e.ctrlKey && !e.altKey && !e.metaKey) return true;
-
+      if (e.type !== "keydown" || !e.ctrlKey) return true;
       const key = e.key.toLowerCase();
-      if (e.ctrlKey && !e.altKey && key === "a") {
-        if (e.shiftKey) {
-          term.selectAll();        // Ctrl+Shift+A: whole buffer, either pane
-          e.preventDefault();
-          return false;
-        }
-        if (!isShell) {
-          // Claude's CLI maps Ctrl+A to beginning-of-line, so draw the input
-          // highlight ourselves (guaranteed visible, hugging the text).
-          selectInputLine(term);
-          e.preventDefault();
-          return false;
-        }
-        // Shell pane: fall through so ^A reaches PSReadLine, whose own SelectAll
-        // highlights just the typed command (no prompt, no border).
-      }
-      if (e.ctrlKey && key === "c") {
+      if (key === "c") {
         const sel = term.getSelection();
         if (e.shiftKey || sel) {
           if (sel) { void copyText(sel); term.clearSelection(); }
-          e.preventDefault();
-          return false; // consume — copy, don't also send ^C
+          return false; // consume — don't also send ^C
         }
-        return true; // no selection: ^C falls through to xterm as SIGINT
+        return true; // no selection: let ^C through as SIGINT
       }
-      if (e.ctrlKey && !e.altKey && key === "v") {
-        return false; // native paste fires; xterm's paste handler feeds the PTY
+      if (e.shiftKey && key === "v") {
+        void pasteInto(s.id);
+        return false;
       }
-
-      // Every other Ctrl/Alt/Meta chord — Ctrl+Z undo, Ctrl+Y redo, Ctrl+P,
-      // Tab, Ctrl+R search, … — goes to the shell: cancel the webview
-      // accelerator, but let xterm forward the real control sequence to the PTY.
-      e.preventDefault();
       return true;
     });
-    // Right-click only copies a live selection (then clears it) and otherwise
-    // does nothing; the webview's own context menu is always suppressed. Paste
-    // is Ctrl+V / Ctrl+Shift+V, so a stray right-click can never dump the
-    // clipboard into the shell or pop a menu full of options.
+    // Right-click pastes (conhost/PuTTY convention).
     host.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      const sel = term.getSelection();
-      if (sel) {
-        void copyText(sel);
-        term.clearSelection();
-      }
+      void pasteInto(s.id);
     });
-    // Clicking the header or padding hands the keyboard back to the terminal.
-    // Clicks on the screen itself are left entirely to xterm so drag-to-select
-    // is never disturbed — xterm focuses and starts the selection on its own.
-    root.addEventListener("mousedown", (e) => {
-      const t = e.target as HTMLElement;
-      if (t.closest("button") || t.closest(".xterm")) return;
-      term.focus();
-    });
-    // Mirror the real focus state onto the pane's focus ring, however focus
-    // was acquired (click, Tab, programmatic).
-    host.addEventListener("focusin", () => this.setFocusedClass(s.id));
 
     const doFit = () => {
       try {
@@ -368,7 +301,7 @@ export class Panes {
     const maximize = document.createElement("button");
     maximize.className = "pane-max";
     maximize.textContent = "⤢";
-    maximize.title = "Fullscreen this pane (double-click header or ⤡ to exit)";
+    maximize.title = "Fullscreen this pane (Esc to exit)";
     maximize.onclick = () => this.toggleMaximize(s.id);
     head.appendChild(maximize);
 
@@ -419,25 +352,14 @@ function quotePath(p: string): string {
   return /\s/.test(p) ? `"${p}"` : p;
 }
 
-/** Select (and visibly highlight) the logical line the cursor sits on — i.e.
- *  the command currently being typed, spanning any wrapped continuation rows.
- *  Done in xterm so the highlight is guaranteed visible regardless of whether
- *  the shell renders its own selection. */
-function selectInputLine(term: Terminal): void {
-  const buf = term.buffer.active;
-  const cursorRow = buf.baseY + buf.cursorY; // absolute row of the cursor
-  let start = cursorRow;
-  while (start > 0 && buf.getLine(start)?.isWrapped) start--; // up to logical start
-  let end = cursorRow;
-  while (buf.getLine(end + 1)?.isWrapped) end++; // down across wrapped rows
-  // Select only up to the last non-blank cell so the highlight hugs the text
-  // instead of stretching the full width out to the pane border.
-  const contentLen = buf.getLine(end)?.translateToString(true).length ?? 0;
-  const length = (end - start) * term.cols + contentLen;
-  if (length > 0) term.select(0, start, length);
-}
-
 /** Copy text to the system clipboard (best-effort; ignores denial). */
 async function copyText(text: string): Promise<void> {
   try { await navigator.clipboard.writeText(text); } catch { /* clipboard blocked */ }
+}
+
+/** Read clipboard text and feed it to a live PTY as input. */
+async function pasteInto(sessionId: string): Promise<void> {
+  let text = "";
+  try { text = await navigator.clipboard.readText(); } catch { /* clipboard blocked */ }
+  if (text) await api.sendInput(sessionId, text);
 }
