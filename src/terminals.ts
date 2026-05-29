@@ -192,14 +192,19 @@ export class Panes {
 
     term.onData((d) => void api.sendInput(s.id, d));
 
-    // Drive the pane like a real console: route every keystroke to the PTY.
-    // The webview would otherwise eat a pile of chords as browser accelerators
-    // — Ctrl+P (print), Ctrl+F (find), Ctrl+R / F-keys (reload), Ctrl+S (save),
-    // Ctrl+W (close window), Ctrl +/-/0 (zoom) — so they'd never reach the
-    // shell. We cancel those defaults and let xterm translate the chord into
-    // the control byte conhost/readline expects (^A, ^P, arrows, …). Three
-    // ergonomic exceptions remain: the two clipboard chords below, and a bare
-    // Ctrl+V whose native `paste` event xterm needs to read the clipboard.
+    // Drive the pane like a real console, but honor the desktop clipboard
+    // chords users expect. Most Ctrl/Alt chords are forwarded to the shell as
+    // their control byte, and the webview's own accelerators (Ctrl+P print,
+    // Ctrl+F find, Ctrl+R reload, Ctrl+S save, Ctrl+W close, Ctrl +/-/0 zoom)
+    // are cancelled so they can't hijack the key. The clipboard chords are
+    // special-cased:
+    //   • Ctrl+A           — select the whole buffer
+    //   • Ctrl+C / ⇧Ctrl+C — copy the selection (bare Ctrl+C with none → ^C)
+    //   • Ctrl+V / ⇧Ctrl+V — paste
+    // Paste returns false *without* preventDefault: that short-circuits xterm's
+    // keydown so it never emits ^V (\x16) — the bug that stopped pastes — while
+    // letting the OS paste proceed, after which xterm's own `paste` listener
+    // injects the clipboard text into the PTY. No clipboard-read grant needed.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
       // Plain keys, the arrows, Home/End/PageUp-Down and the function keys
@@ -207,8 +212,11 @@ export class Panes {
       if (!e.ctrlKey && !e.altKey && !e.metaKey) return true;
 
       const key = e.key.toLowerCase();
-      // Ctrl+Shift+C, or Ctrl+C with a selection: copy. A bare Ctrl+C with no
-      // selection falls through to xterm as ^C (SIGINT), the usual behavior.
+      if (e.ctrlKey && !e.altKey && key === "a") {
+        term.selectAll();
+        e.preventDefault();
+        return false;
+      }
       if (e.ctrlKey && key === "c") {
         const sel = term.getSelection();
         if (e.shiftKey || sel) {
@@ -216,16 +224,11 @@ export class Panes {
           e.preventDefault();
           return false; // consume — copy, don't also send ^C
         }
-        return true;
+        return true; // no selection: ^C falls through to xterm as SIGINT
       }
-      if (e.ctrlKey && e.shiftKey && key === "v") {
-        void pasteInto(s.id);
-        e.preventDefault();
-        return false;
+      if (e.ctrlKey && !e.altKey && key === "v") {
+        return false; // native paste fires; xterm's paste handler feeds the PTY
       }
-      // Bare Ctrl+V: leave it untouched so xterm's textarea receives the OS
-      // paste event (preventDefault here would cancel that event).
-      if (e.ctrlKey && !e.shiftKey && key === "v") return true;
 
       // Every other Ctrl/Alt/Meta chord: kill the webview accelerator, but let
       // xterm send the real control sequence on to the shell.
