@@ -193,14 +193,17 @@ export class Panes {
     term.onData((d) => void api.sendInput(s.id, d));
 
     // Drive the pane like a real console, but honor the desktop clipboard
-    // chords users expect. Most Ctrl/Alt chords are forwarded to the shell as
-    // their control byte, and the webview's own accelerators (Ctrl+P print,
+    // chords users expect. Every Ctrl/Alt chord is forwarded to the shell as
+    // its control byte, so the shell's own line editor handles it scoped to the
+    // command at the cursor; the webview's own accelerators (Ctrl+P print,
     // Ctrl+F find, Ctrl+R reload, Ctrl+S save, Ctrl+W close, Ctrl +/-/0 zoom)
-    // are cancelled so they can't hijack the key. The clipboard chords are
-    // special-cased:
-    //   • Ctrl+A           — select the whole buffer
-    //   • Ctrl+C / ⇧Ctrl+C — copy the selection (bare Ctrl+C with none → ^C)
-    //   • Ctrl+V / ⇧Ctrl+V — paste
+    // are cancelled so they can't hijack the key. Special cases:
+    //   • Ctrl+A             — sent to the shell. PSReadLine/readline acts on
+    //                          the command line at the cursor (NOT the whole
+    //                          buffer), so typing a command stays unaffected.
+    //   • Ctrl+Shift+A       — select THIS pane's whole buffer, to copy it out.
+    //   • Ctrl+C / Ctrl+⇧+C  — copy the selection (bare Ctrl+C with none → ^C).
+    //   • Ctrl+V / Ctrl+⇧+V  — paste.
     // Paste returns false *without* preventDefault: that short-circuits xterm's
     // keydown so it never emits ^V (\x16) — the bug that stopped pastes — while
     // letting the OS paste proceed, after which xterm's own `paste` listener
@@ -212,7 +215,9 @@ export class Panes {
       if (!e.ctrlKey && !e.altKey && !e.metaKey) return true;
 
       const key = e.key.toLowerCase();
-      if (e.ctrlKey && !e.altKey && key === "a") {
+      // Whole-buffer select is the explicit Ctrl+Shift+A gesture, so a plain
+      // Ctrl+A while typing stays with the shell and never grabs the window.
+      if (e.ctrlKey && e.shiftKey && !e.altKey && key === "a") {
         term.selectAll();
         e.preventDefault();
         return false;
@@ -230,8 +235,9 @@ export class Panes {
         return false; // native paste fires; xterm's paste handler feeds the PTY
       }
 
-      // Every other Ctrl/Alt/Meta chord: kill the webview accelerator, but let
-      // xterm send the real control sequence on to the shell.
+      // Every other Ctrl/Alt/Meta chord — including a bare Ctrl+A — is left to
+      // the shell: cancel the webview accelerator, but let xterm forward the
+      // real control sequence on to the PTY.
       e.preventDefault();
       return true;
     });
