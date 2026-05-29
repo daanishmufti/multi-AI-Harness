@@ -113,6 +113,12 @@ export class Panes {
     const p = this.panes.get(id);
     p?.term?.focus();
     p?.root.scrollIntoView({ block: "nearest" });
+    this.setFocusedClass(id);
+  }
+
+  /** Paint the focus ring on one pane (and clear it from the rest) without
+   *  re-grabbing focus — used when the terminal itself reports a focus change. */
+  private setFocusedClass(id: string | null): void {
     for (const [pid, pane] of this.panes) pane.root.classList.toggle("focused", pid === id);
   }
 
@@ -186,25 +192,44 @@ export class Panes {
 
     term.onData((d) => void api.sendInput(s.id, d));
 
-    // Clipboard, terminal-style: Ctrl+Shift+C / Ctrl+Shift+V always copy/paste,
-    // and a bare Ctrl+C copies when there's a selection (otherwise it falls
-    // through as SIGINT, the usual terminal behavior). Native Ctrl+V still works
-    // too — xterm handles the textarea paste event itself.
+    // Drive the pane like a real console: route every keystroke to the PTY.
+    // The webview would otherwise eat a pile of chords as browser accelerators
+    // — Ctrl+P (print), Ctrl+F (find), Ctrl+R / F-keys (reload), Ctrl+S (save),
+    // Ctrl+W (close window), Ctrl +/-/0 (zoom) — so they'd never reach the
+    // shell. We cancel those defaults and let xterm translate the chord into
+    // the control byte conhost/readline expects (^A, ^P, arrows, …). Three
+    // ergonomic exceptions remain: the two clipboard chords below, and a bare
+    // Ctrl+V whose native `paste` event xterm needs to read the clipboard.
     term.attachCustomKeyEventHandler((e) => {
-      if (e.type !== "keydown" || !e.ctrlKey) return true;
+      if (e.type !== "keydown") return true;
+      // Plain keys, the arrows, Home/End/PageUp-Down and the function keys
+      // already emit the correct sequence via xterm; nothing to guard.
+      if (!e.ctrlKey && !e.altKey && !e.metaKey) return true;
+
       const key = e.key.toLowerCase();
-      if (key === "c") {
+      // Ctrl+Shift+C, or Ctrl+C with a selection: copy. A bare Ctrl+C with no
+      // selection falls through to xterm as ^C (SIGINT), the usual behavior.
+      if (e.ctrlKey && key === "c") {
         const sel = term.getSelection();
         if (e.shiftKey || sel) {
           if (sel) { void copyText(sel); term.clearSelection(); }
-          return false; // consume — don't also send ^C
+          e.preventDefault();
+          return false; // consume — copy, don't also send ^C
         }
-        return true; // no selection: let ^C through as SIGINT
+        return true;
       }
-      if (e.shiftKey && key === "v") {
+      if (e.ctrlKey && e.shiftKey && key === "v") {
         void pasteInto(s.id);
+        e.preventDefault();
         return false;
       }
+      // Bare Ctrl+V: leave it untouched so xterm's textarea receives the OS
+      // paste event (preventDefault here would cancel that event).
+      if (e.ctrlKey && !e.shiftKey && key === "v") return true;
+
+      // Every other Ctrl/Alt/Meta chord: kill the webview accelerator, but let
+      // xterm send the real control sequence on to the shell.
+      e.preventDefault();
       return true;
     });
     // Right-click pastes (conhost/PuTTY convention).
@@ -212,6 +237,16 @@ export class Panes {
       e.preventDefault();
       void pasteInto(s.id);
     });
+    // Clicking anywhere in the pane — header, padding, or the screen — hands
+    // the keyboard back to the terminal, so typing and the chords above land
+    // in the shell rather than the dashboard's global shortcuts. Header
+    // buttons (detach / maximize) keep their own click behavior.
+    root.addEventListener("mousedown", (e) => {
+      if (!(e.target as HTMLElement).closest("button")) term.focus();
+    });
+    // Mirror the real focus state onto the pane's focus ring, however focus
+    // was acquired (click, Tab, programmatic).
+    host.addEventListener("focusin", () => this.setFocusedClass(s.id));
 
     const doFit = () => {
       try {
@@ -301,7 +336,7 @@ export class Panes {
     const maximize = document.createElement("button");
     maximize.className = "pane-max";
     maximize.textContent = "⤢";
-    maximize.title = "Fullscreen this pane (Esc to exit)";
+    maximize.title = "Fullscreen this pane (double-click header or ⤡ to exit)";
     maximize.onclick = () => this.toggleMaximize(s.id);
     head.appendChild(maximize);
 
