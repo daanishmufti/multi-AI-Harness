@@ -196,18 +196,17 @@ export class Panes {
 
     term.onData((d) => void api.sendInput(s.id, d));
 
-    // Drive the pane like a real console, but honor the desktop clipboard
-    // chords users expect. Every Ctrl/Alt chord is forwarded to the shell as
-    // its control byte, so the shell's own line editor handles it scoped to the
-    // command at the cursor; the webview's own accelerators (Ctrl+P print,
-    // Ctrl+F find, Ctrl+R reload, Ctrl+S save, Ctrl+W close, Ctrl +/-/0 zoom)
-    // are cancelled so they can't hijack the key. Special cases:
-    //   • Ctrl+A             — sent to the shell. PSReadLine/readline acts on
-    //                          the command line at the cursor (NOT the whole
-    //                          buffer), so typing a command stays unaffected.
-    //   • Ctrl+Shift+A       — select THIS pane's whole buffer, to copy it out.
+    // Drive the pane like a real console, but handle the chords a GUI terminal
+    // user expects up front; the rest forward to the shell as control bytes,
+    // and the webview's own accelerators (Ctrl+P print, Ctrl+F find, Ctrl+R
+    // reload, Ctrl+S save, Ctrl+W close, Ctrl +/-/0 zoom) are cancelled so they
+    // can't hijack the key:
+    //   • Ctrl+A             — highlight the command line at the cursor (the
+    //                          input), drawn by xterm so it's always visible.
+    //   • Ctrl+Shift+A       — select THIS pane's whole buffer (to copy output).
     //   • Ctrl+C / Ctrl+⇧+C  — copy the selection (bare Ctrl+C with none → ^C).
     //   • Ctrl+V / Ctrl+⇧+V  — paste.
+    //   • Ctrl+Z / Ctrl+Y, … — forwarded to the shell (PSReadLine undo / redo).
     // Paste returns false *without* preventDefault: that short-circuits xterm's
     // keydown so it never emits ^V (\x16) — the bug that stopped pastes — while
     // letting the OS paste proceed, after which xterm's own `paste` listener
@@ -219,10 +218,12 @@ export class Panes {
       if (!e.ctrlKey && !e.altKey && !e.metaKey) return true;
 
       const key = e.key.toLowerCase();
-      // Whole-buffer select is the explicit Ctrl+Shift+A gesture, so a plain
-      // Ctrl+A while typing stays with the shell and never grabs the window.
-      if (e.ctrlKey && e.shiftKey && !e.altKey && key === "a") {
-        term.selectAll();
+      // Ctrl+A highlights the command line at the cursor; Ctrl+Shift+A selects
+      // the whole buffer. We draw the selection in xterm ourselves so it is
+      // always visible, instead of hoping the shell renders its own highlight.
+      if (e.ctrlKey && !e.altKey && key === "a") {
+        if (e.shiftKey) term.selectAll();
+        else selectInputLine(term);
         e.preventDefault();
         return false;
       }
@@ -239,9 +240,9 @@ export class Panes {
         return false; // native paste fires; xterm's paste handler feeds the PTY
       }
 
-      // Every other Ctrl/Alt/Meta chord — including a bare Ctrl+A — is left to
-      // the shell: cancel the webview accelerator, but let xterm forward the
-      // real control sequence on to the PTY.
+      // Every other Ctrl/Alt/Meta chord — Ctrl+Z undo, Ctrl+Y redo, Ctrl+P,
+      // Tab, Ctrl+R search, … — goes to the shell: cancel the webview
+      // accelerator, but let xterm forward the real control sequence to the PTY.
       e.preventDefault();
       return true;
     });
@@ -407,6 +408,20 @@ function escapeHtml(s: string): string {
 /** Quote a path for a shell/Claude prompt only when it contains whitespace. */
 function quotePath(p: string): string {
   return /\s/.test(p) ? `"${p}"` : p;
+}
+
+/** Select (and visibly highlight) the logical line the cursor sits on — i.e.
+ *  the command currently being typed, spanning any wrapped continuation rows.
+ *  Done in xterm so the highlight is guaranteed visible regardless of whether
+ *  the shell renders its own selection. */
+function selectInputLine(term: Terminal): void {
+  const buf = term.buffer.active;
+  const cursorRow = buf.baseY + buf.cursorY; // absolute row of the cursor
+  let start = cursorRow;
+  while (start > 0 && buf.getLine(start)?.isWrapped) start--; // up to logical start
+  let end = cursorRow;
+  while (buf.getLine(end + 1)?.isWrapped) end++; // down across wrapped rows
+  term.selectLines(start, end);
 }
 
 /** Copy text to the system clipboard (best-effort; ignores denial). */
