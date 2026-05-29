@@ -246,17 +246,16 @@ export class Panes {
       e.preventDefault();
       return true;
     });
-    // Right-click is conhost-style: copy a live selection (then clear it), or
-    // paste when nothing is selected. So drag-to-select stays useful instead of
-    // the menu pasting over your selection the instant you right-click.
+    // Right-click only copies a live selection (then clears it) and otherwise
+    // does nothing; the webview's own context menu is always suppressed. Paste
+    // is Ctrl+V / Ctrl+Shift+V, so a stray right-click can never dump the
+    // clipboard into the shell or pop a menu full of options.
     host.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       const sel = term.getSelection();
       if (sel) {
         void copyText(sel);
         term.clearSelection();
-      } else {
-        void pasteInto(s.id);
       }
     });
     // Clicking the header or padding hands the keyboard back to the terminal.
@@ -427,11 +426,4 @@ function selectInputLine(term: Terminal): void {
 /** Copy text to the system clipboard (best-effort; ignores denial). */
 async function copyText(text: string): Promise<void> {
   try { await navigator.clipboard.writeText(text); } catch { /* clipboard blocked */ }
-}
-
-/** Read clipboard text and feed it to a live PTY as input. */
-async function pasteInto(sessionId: string): Promise<void> {
-  let text = "";
-  try { text = await navigator.clipboard.readText(); } catch { /* clipboard blocked */ }
-  if (text) await api.sendInput(sessionId, text);
 }
