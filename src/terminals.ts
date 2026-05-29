@@ -26,6 +26,10 @@ const THEME = {
   background: "#0b0e14",
   foreground: "#c5c8d3",
   cursor: "#7aa2f7",
+  // Without an explicit selection color xterm's highlight is nearly invisible
+  // on this dark background, which reads as "drag-select doesn't work".
+  selectionBackground: "#33467c",
+  selectionInactiveBackground: "#2a2f45",
   black: "#15161e",
   brightBlack: "#414868",
   red: "#f7768e",
@@ -241,17 +245,26 @@ export class Panes {
       e.preventDefault();
       return true;
     });
-    // Right-click pastes (conhost/PuTTY convention).
+    // Right-click is conhost-style: copy a live selection (then clear it), or
+    // paste when nothing is selected. So drag-to-select stays useful instead of
+    // the menu pasting over your selection the instant you right-click.
     host.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      void pasteInto(s.id);
+      const sel = term.getSelection();
+      if (sel) {
+        void copyText(sel);
+        term.clearSelection();
+      } else {
+        void pasteInto(s.id);
+      }
     });
-    // Clicking anywhere in the pane — header, padding, or the screen — hands
-    // the keyboard back to the terminal, so typing and the chords above land
-    // in the shell rather than the dashboard's global shortcuts. Header
-    // buttons (detach / maximize) keep their own click behavior.
+    // Clicking the header or padding hands the keyboard back to the terminal.
+    // Clicks on the screen itself are left entirely to xterm so drag-to-select
+    // is never disturbed — xterm focuses and starts the selection on its own.
     root.addEventListener("mousedown", (e) => {
-      if (!(e.target as HTMLElement).closest("button")) term.focus();
+      const t = e.target as HTMLElement;
+      if (t.closest("button") || t.closest(".xterm")) return;
+      term.focus();
     });
     // Mirror the real focus state onto the pane's focus ring, however focus
     // was acquired (click, Tab, programmatic).
