@@ -1,5 +1,6 @@
 import "@xterm/xterm/css/xterm.css";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ask, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { api, fmtBytes, fmtTokens, on } from "./api";
 import { installKeyboard } from "./keyboard";
@@ -360,7 +361,7 @@ async function newSession(mode: SessionMode): Promise<void> {
   ];
   // Shells don't take a model; agent sessions do.
   if (mode !== "shell") {
-    fields.push({ key: "model", label: "Model (blank = default)", placeholder: "claude-opus-4-7 / claude-sonnet-4-6" });
+    fields.push({ key: "model", label: "Model (blank = default)", placeholder: "leave blank for default" });
   }
   fields.push({ key: "name", label: "Name (optional)" });
   if (mode === "headless") {
@@ -674,6 +675,7 @@ async function init(): Promise<void> {
 
   wireEvents();
   wireButtons();
+  wireFileDrop();
   const sidebar = installSidebarResizer();
   el("#sidebar-toggle").onclick = () => sidebar.toggle();
   installTaskbarResizer();
@@ -762,6 +764,38 @@ function wireButtons(): void {
     api.broadcast(v).then((n) => reportErr(`Broadcast to ${n} session(s)`)).catch(reportErr);
     input.value = "";
     input.blur();
+  });
+}
+
+// ---- file drag-and-drop -----------------------------------------------------
+// Tauri intercepts OS file drops at the webview level (HTML5 drop events never
+// fire), so we listen to its drag-drop stream and route the real disk paths to
+// whichever pane the cursor is over. Positions arrive in physical pixels.
+
+function wireFileDrop(): void {
+  const toClient = (pos: { x: number; y: number }) => {
+    const r = window.devicePixelRatio || 1;
+    return { x: pos.x / r, y: pos.y / r };
+  };
+  void getCurrentWebview().onDragDropEvent((e) => {
+    const p = e.payload;
+    switch (p.type) {
+      case "enter":
+      case "over": {
+        const { x, y } = toClient(p.position);
+        panes.setDropTarget(x, y);
+        break;
+      }
+      case "drop": {
+        const { x, y } = toClient(p.position);
+        if (!panes.handleFileDrop(x, y, p.paths)) {
+          reportErr("Drop files onto a session pane to insert their paths");
+        }
+        break;
+      }
+      default: // "leave"
+        panes.clearDropTarget();
+    }
   });
 }
 

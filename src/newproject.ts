@@ -43,7 +43,7 @@ export function openNewProjectModal(
   const row2 = document.createElement("div");
   row2.className = "row2";
   const modelInput = document.createElement("input");
-  modelInput.placeholder = "claude-opus-4-7";
+  modelInput.placeholder = "leave blank for default";
   const modelWrap = field("Model (blank = default)", modelInput);
   const permSel = document.createElement("select");
   for (const p of PERMS) permSel.appendChild(option(p, p));

@@ -19,6 +19,7 @@ interface Pane {
   resizeObs?: ResizeObserver;
   // headless
   logBody?: HTMLElement;
+  msgInput?: HTMLInputElement;
 }
 
 const THEME = {
@@ -119,6 +120,48 @@ export class Panes {
     return [...this.panes.keys()];
   }
 
+  // ---- drag-and-drop -------------------------------------------------------
+  // Tauri intercepts OS file drops and hands us real disk paths plus a cursor
+  // position. We hit-test which pane the cursor is over and drop the path in.
+
+  /** Highlight the pane currently under the dragged files (if any). */
+  setDropTarget(clientX: number, clientY: number): void {
+    const id = this.paneIdAt(clientX, clientY);
+    for (const [pid, p] of this.panes) p.root.classList.toggle("drop-target", pid === id);
+  }
+
+  clearDropTarget(): void {
+    for (const p of this.panes.values()) p.root.classList.remove("drop-target");
+  }
+
+  /** Insert dropped file path(s) into the pane under the cursor. Returns false
+   *  if the drop didn't land on a pane (so the caller can hint the user). */
+  handleFileDrop(clientX: number, clientY: number, paths: string[]): boolean {
+    this.clearDropTarget();
+    const id = this.paneIdAt(clientX, clientY);
+    const p = id ? this.panes.get(id) : undefined;
+    if (!p || !paths.length) return false;
+    const text = paths.map(quotePath).join(" ");
+    if (p.mode === "interactive") {
+      // Live PTY (Claude or shell): type the path(s) straight in, trailing space.
+      void api.sendInput(p.id, text + " ");
+      p.term?.focus();
+    } else if (p.msgInput) {
+      // Headless worker: append into the message box without sending.
+      const inp = p.msgInput;
+      const sep = inp.value && !inp.value.endsWith(" ") ? " " : "";
+      inp.value = inp.value + sep + text + " ";
+      inp.focus();
+    }
+    return true;
+  }
+
+  private paneIdAt(clientX: number, clientY: number): string | null {
+    const node = (document.elementFromPoint(clientX, clientY) as Element | null)
+      ?.closest(".pane[data-id]") as HTMLElement | null;
+    return node?.dataset.id ?? null;
+  }
+
   // ---- interactive (xterm) -------------------------------------------------
 
   private createTerminal(s: SessionInfo): void {
@@ -142,6 +185,33 @@ export class Panes {
     try { fit.fit(); } catch { /* host not laid out yet */ }
 
     term.onData((d) => void api.sendInput(s.id, d));
+
+    // Clipboard, terminal-style: Ctrl+Shift+C / Ctrl+Shift+V always copy/paste,
+    // and a bare Ctrl+C copies when there's a selection (otherwise it falls
+    // through as SIGINT, the usual terminal behavior). Native Ctrl+V still works
+    // too — xterm handles the textarea paste event itself.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== "keydown" || !e.ctrlKey) return true;
+      const key = e.key.toLowerCase();
+      if (key === "c") {
+        const sel = term.getSelection();
+        if (e.shiftKey || sel) {
+          if (sel) { void copyText(sel); term.clearSelection(); }
+          return false; // consume — don't also send ^C
+        }
+        return true; // no selection: let ^C through as SIGINT
+      }
+      if (e.shiftKey && key === "v") {
+        void pasteInto(s.id);
+        return false;
+      }
+      return true;
+    });
+    // Right-click pastes (conhost/PuTTY convention).
+    host.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      void pasteInto(s.id);
+    });
 
     const doFit = () => {
       try {
@@ -181,7 +251,7 @@ export class Panes {
     });
     root.appendChild(form);
 
-    this.panes.set(s.id, { id: s.id, mode: "headless", root, logBody: body });
+    this.panes.set(s.id, { id: s.id, mode: "headless", root, logBody: body, msgInput: input });
 
     // Backfill recent history, then live events stream in via onLog().
     api.getLogs(s.id, 300).then((logs) => logs.forEach((l) => this.appendLog(body, l)));
@@ -275,4 +345,21 @@ export class Panes {
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+}
+
+/** Quote a path for a shell/Claude prompt only when it contains whitespace. */
+function quotePath(p: string): string {
+  return /\s/.test(p) ? `"${p}"` : p;
+}
+
+/** Copy text to the system clipboard (best-effort; ignores denial). */
+async function copyText(text: string): Promise<void> {
+  try { await navigator.clipboard.writeText(text); } catch { /* clipboard blocked */ }
+}
+
+/** Read clipboard text and feed it to a live PTY as input. */
+async function pasteInto(sessionId: string): Promise<void> {
+  let text = "";
+  try { text = await navigator.clipboard.readText(); } catch { /* clipboard blocked */ }
+  if (text) await api.sendInput(sessionId, text);
 }
